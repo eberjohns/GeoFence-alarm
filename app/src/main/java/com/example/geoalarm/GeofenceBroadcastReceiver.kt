@@ -15,26 +15,20 @@ import com.google.android.gms.location.GeofencingEvent
 class GeofenceBroadcastReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
-
-        // 1. Check if this is the Fake Test Button
-        val isTest = intent.getBooleanExtra("IS_TEST_MODE", false)
-        if (isTest) {
-            Log.d("GeoAlarm", "TEST MODE DETECTED! FIRING ALARM!")
-            fireFullScreenAlarm(context)
-            return // Stop here, don't check for GPS
-        }
-
-        // 2. Otherwise, treat it as a real GPS Geofence event
         val geofencingEvent = GeofencingEvent.fromIntent(intent)
 
-        if (geofencingEvent?.hasError() == true) {
-            Log.e("GeoAlarm", "Error receiving geofence event")
-            return
-        }
+        if (geofencingEvent?.hasError() == true) return
 
         if (geofencingEvent?.geofenceTransition == Geofence.GEOFENCE_TRANSITION_ENTER) {
-            Log.d("GeoAlarm", "TARGET ZONE ENTERED! FIRING ALARM!")
-            fireFullScreenAlarm(context)
+            Log.d("GeoAlarm", "2KM WIDE NET BREACHED! Waking up Sniper Radar...")
+
+            // Start the Foreground Radar Service
+            val serviceIntent = Intent(context, RadarService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(serviceIntent)
+            } else {
+                context.startService(serviceIntent)
+            }
         }
     }
 

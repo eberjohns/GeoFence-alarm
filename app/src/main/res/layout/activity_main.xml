@@ -17,15 +17,18 @@
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toTopOf="parent" />
-    <!-- Test button fragment -->
+    <!-- The SET ALARM Button -->
     <Button
-        android:id="@+id/btnTestAlarm"
+        android:id="@+id/btnSetAlarm"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_marginBottom="32dp"
-        android:text="TEST ALARM WAKE"
-        android:backgroundTint="#FF0000"
+        android:backgroundTint="#4CAF50"
+        android:text="SET ALARM"
         android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:textStyle="bold"
+        android:visibility="gone"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent" />
