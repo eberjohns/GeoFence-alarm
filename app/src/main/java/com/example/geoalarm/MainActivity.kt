@@ -28,6 +28,11 @@ import com.google.android.gms.maps.model.CircleOptions
 import com.google.android.gms.maps.model.LatLng
 import com.google.android.gms.maps.model.MarkerOptions
 import androidx.activity.result.IntentSenderRequest
+import android.location.Geocoder
+import android.widget.EditText
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import com.google.android.gms.maps.CameraUpdateFactory
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -35,6 +40,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private var alarmLocation: LatLng? = null
     private val visualRadius = 100.0 // The map will show the 100m sniper zone
     private lateinit var btnSetAlarm: Button
+    private lateinit var etSearch: EditText
+    private lateinit var btnSearch: Button
 
     private lateinit var geofencingClient: GeofencingClient
     private val geofencePendingIntent: PendingIntent by lazy {
@@ -87,10 +94,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
                 addGeofence(location) // Arm the 2km wide net
 
+                // Update UX State
                 btnSetAlarm.isEnabled = false
-                btnSetAlarm.text = "ALARM ARMED"
-                btnSetAlarm.setBackgroundColor(Color.GRAY)
+                btnSetAlarm.text = "SYSTEM ARMED"
+                btnSetAlarm.setBackgroundColor(Color.parseColor("#1E88E5")) // Changes to a sleek locked-in Blue
+                btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_secure, 0, 0, 0) // Adds a native lock icon
             }
+        }
+
+        etSearch = findViewById(R.id.etSearch)
+        btnSearch = findViewById(R.id.btnSearch)
+
+        // Trigger search when the GO button is tapped
+        btnSearch.setOnClickListener {
+            performSearch()
+        }
+
+        // Trigger search when the 'Enter'/'Search' key on the keyboard is pressed
+        etSearch.setOnEditorActionListener { _, actionId, _ ->
+            if (actionId == EditorInfo.IME_ACTION_SEARCH) {
+                performSearch()
+                true
+            } else false
         }
     }
 
@@ -99,19 +124,7 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         checkLocationSettings()
 
         mMap.setOnMapLongClickListener { latLng ->
-            mMap.clear()
-            alarmLocation = latLng
-
-            mMap.addMarker(MarkerOptions().position(latLng).title("Sniper Trigger Zone"))
-            mMap.addCircle(
-                CircleOptions().center(latLng).radius(visualRadius)
-                    .strokeColor(Color.RED).fillColor(Color.argb(70, 255, 0, 0)).strokeWidth(5f)
-            )
-
-            btnSetAlarm.visibility = android.view.View.VISIBLE
-            btnSetAlarm.isEnabled = true
-            btnSetAlarm.text = "SET ALARM"
-            btnSetAlarm.setBackgroundColor(Color.parseColor("#4CAF50"))
+            setTargetLocation(latLng) // Now both clicking and searching do the exact same thing
         }
     }
 
@@ -124,6 +137,52 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
         requestPermissionLauncher.launch(permissions.toTypedArray())
+    }
+
+    private fun performSearch() {
+        val query = etSearch.text.toString()
+        if (query.isEmpty()) return
+
+        // Hide keyboard
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(etSearch.windowToken, 0)
+
+        try {
+            val geocoder = Geocoder(this)
+            val addresses = geocoder.getFromLocationName(query, 1)
+
+            if (!addresses.isNullOrEmpty()) {
+                val location = addresses[0]
+                val latLng = LatLng(location.latitude, location.longitude)
+
+                // Fly the camera to the searched location
+                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(latLng, 15f))
+
+                // Drop the pin
+                setTargetLocation(latLng)
+            } else {
+                Log.e("GeoAlarm", "Location not found")
+            }
+        } catch (e: Exception) {
+            Log.e("GeoAlarm", "Geocoding failed: ${e.message}")
+        }
+    }
+
+    private fun setTargetLocation(latLng: LatLng) {
+        mMap.clear()
+        alarmLocation = latLng
+
+        mMap.addMarker(MarkerOptions().position(latLng).title("Sniper Trigger Zone"))
+        mMap.addCircle(
+            CircleOptions().center(latLng).radius(visualRadius)
+                .strokeColor(Color.RED).fillColor(Color.argb(70, 255, 0, 0)).strokeWidth(5f)
+        )
+
+        btnSetAlarm.visibility = android.view.View.VISIBLE
+        btnSetAlarm.isEnabled = true
+        btnSetAlarm.text = "SET ALARM"
+        btnSetAlarm.setBackgroundColor(Color.parseColor("#4CAF50"))
+        btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
     }
 
     private fun checkLocationSettings() {

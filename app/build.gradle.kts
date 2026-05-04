@@ -1,3 +1,6 @@
+import java.util.Properties
+import java.io.FileInputStream
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -8,13 +11,23 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.geoalarm"
+        applicationId = "com.example.geoalarm" // (Keep whatever yours is)
         minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
-        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // --- THE VAULT READER ---
+        val keystoreProperties = Properties()
+        val keystorePropertiesFile = rootProject.file("local.properties")
+        if (keystorePropertiesFile.exists()) {
+            keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+        }
+
+        // Safely inject the key using standard Kotlin map syntax
+        val mapsKey = keystoreProperties.getProperty("MAPS_API_KEY") ?: ""
+        manifestPlaceholders["MAPS_API_KEY"] = mapsKey
+        // ------------------------
     }
 
     buildTypes {
