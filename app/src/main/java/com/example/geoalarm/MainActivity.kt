@@ -36,18 +36,21 @@ import com.google.android.gms.maps.CameraUpdateFactory
 import java.net.HttpURLConnection
 import java.net.URL
 import java.util.regex.Pattern
+import android.widget.Toast
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private lateinit var mMap: GoogleMap
     private var alarmLocation: LatLng? = null
-    private val visualRadius = 100.0 // The map will show the 100m sniper zone
+    private val visualRadius = 500.0 // The map will show the 500m sniper zone
     private lateinit var btnSetAlarm: Button
     private lateinit var etSearch: EditText
     private lateinit var btnSearch: Button
 
     // This creates the Geocoder once, and reuses it forever to save memory
     private val geocoder by lazy { Geocoder(this) }
+
+    private var isSystemArmed = false
 
     private lateinit var geofencingClient: GeofencingClient
     private val geofencePendingIntent: PendingIntent by lazy {
@@ -88,23 +91,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         requestPermissions()
 
         btnSetAlarm.setOnClickListener {
-            alarmLocation?.let { location ->
-
-                // SAVE TARGET TO MEMORY FOR THE SNIPER SERVICE
-                val prefs = getSharedPreferences("GeoPrefs", Context.MODE_PRIVATE)
-                prefs.edit().apply {
-                    putFloat("TARGET_LAT", location.latitude.toFloat())
-                    putFloat("TARGET_LNG", location.longitude.toFloat())
-                    apply()
+            if (isSystemArmed) {
+                cancelAlarm() // If armed, pressing it acts as a kill switch
+            } else {
+                // Safely unwrap the nullable coordinate
+                alarmLocation?.let { target ->
+                    addGeofence(target) // If disarmed, pressing it sets the alarm
                 }
-
-                addGeofence(location) // Arm the 2km wide net
-
-                // Update UX State
-                btnSetAlarm.isEnabled = false
-                btnSetAlarm.text = "SYSTEM ARMED"
-                btnSetAlarm.setBackgroundColor(Color.parseColor("#1E88E5")) // Changes to a sleek locked-in Blue
-                btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_secure, 0, 0, 0) // Adds a native lock icon
             }
         }
 
@@ -186,7 +179,29 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
     }
 
+    private fun cancelAlarm() {
+        // 1. Tell Android OS to delete the 2km wide net
+        geofencingClient.removeGeofences(geofencePendingIntent)
+
+        // 2. Kill the Sniper Radar background service instantly
+        val serviceIntent = Intent(this, RadarService::class.java)
+        stopService(serviceIntent)
+
+        // 3. Reset the system state
+        isSystemArmed = false
+        mMap.clear() // Wipes the red circles and pins off the map
+
+        // Hide the button until they drop a new pin
+        btnSetAlarm.visibility = android.view.View.GONE
+
+        Toast.makeText(this, "Alarm Cancelled & System Disarmed", Toast.LENGTH_SHORT).show()
+    }
+
     private fun setTargetLocation(latLng: LatLng) {
+        if (isSystemArmed) {
+            cancelAlarm()
+        }
+
         mMap.clear()
         alarmLocation = latLng
 
@@ -395,6 +410,13 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             geofencingClient.addGeofences(geofencingRequest, geofencePendingIntent).run {
                 addOnSuccessListener {
                     Log.d("GeoAlarm", "2KM Wide Net Armed! System is watching.")
+
+                    // Transform the button into the Kill Switch
+                    isSystemArmed = true
+                    btnSetAlarm.isEnabled = true
+                    btnSetAlarm.text = "CANCEL ALARM"
+                    btnSetAlarm.setBackgroundColor(Color.parseColor("#F44336")) // Alert Red
+                    btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_close_clear_cancel, 0, 0, 0)
                 }
                 addOnFailureListener {
                     Log.e("GeoAlarm", "Failed to arm net: ${it.message}")
