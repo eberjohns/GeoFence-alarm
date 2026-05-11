@@ -33,6 +33,9 @@ import android.widget.EditText
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import com.google.android.gms.maps.CameraUpdateFactory
+import java.net.HttpURLConnection
+import java.net.URL
+import java.util.regex.Pattern
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -42,6 +45,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private lateinit var btnSetAlarm: Button
     private lateinit var etSearch: EditText
     private lateinit var btnSearch: Button
+
+    // This creates the Geocoder once, and reuses it forever to save memory
+    private val geocoder by lazy { Geocoder(this) }
 
     private lateinit var geofencingClient: GeofencingClient
     private val geofencePendingIntent: PendingIntent by lazy {
@@ -126,6 +132,18 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         mMap.setOnMapLongClickListener { latLng ->
             setTargetLocation(latLng) // Now both clicking and searching do the exact same thing
         }
+
+        handleSharedIntent(intent)
+    }
+
+    // This fires when the app is already open in the background,
+    // and you share a NEW link to it from Google Maps.
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent) // Replace the old intent with the new one
+
+        // Clear the old pin and search for the new one!
+        handleSharedIntent(intent)
     }
 
     private fun requestPermissions() {
@@ -183,6 +201,153 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         btnSetAlarm.text = "SET ALARM"
         btnSetAlarm.setBackgroundColor(Color.parseColor("#4CAF50"))
         btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+    }
+
+    private fun handleSharedIntent(intent: Intent) {
+        if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT) ?: return
+
+            val urlMatcher = Pattern.compile("https?://\\S+").matcher(sharedText)
+            if (urlMatcher.find()) {
+                val shortUrl = urlMatcher.group()
+
+                Thread {
+                    try {
+                        var currentUrl = shortUrl
+                        var htmlContent = ""
+                        var redirects = 0
+
+                        // 1. Manually hop through Google's redirects to catch the true expanded URL
+                        while (redirects < 5) {
+                            val connection = URL(currentUrl).openConnection() as HttpURLConnection
+                            connection.setRequestProperty(
+                                "User-Agent",
+                                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                            )
+                            // WE control the redirects now, not Java
+                            connection.instanceFollowRedirects = false
+                            connection.connect()
+
+                            val responseCode = connection.responseCode
+                            if (responseCode in 300..399) {
+                                // Catch the redirect destination
+                                val location = connection.getHeaderField("Location")
+                                if (location != null) {
+                                    currentUrl = location
+                                    redirects++
+                                    connection.disconnect()
+                                    continue
+                                }
+                            }
+
+                            // If we hit the final page (200 OK), grab the HTML
+                            if (responseCode == 200) {
+                                htmlContent = connection.inputStream.bufferedReader().readText()
+                            }
+                            connection.disconnect()
+                            break
+                        }
+
+                        Log.d("GeoAlarm", "Final Unfurled URL: $currentUrl")
+
+                        var targetLat: Double? = null
+                        var targetLng: Double? = null
+
+                        // STRATEGY 1: Search the unfurled URL for ALL known Google Maps coordinate patterns
+                        val urlRegexes = listOf(
+                            Regex("!3d(-?\\d+\\.\\d+)!4d(-?\\d+\\.\\d+)"), // Matches !3d... !4d...
+                            Regex("@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)"),     // Matches @lat,lng
+                            Regex("[?&](?:q|query|ll)=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)") // Matches ?q=lat,lng
+                        )
+
+                        for (regex in urlRegexes) {
+                            val match = regex.find(currentUrl)
+                            if (match != null) {
+                                targetLat = match.groupValues[1].toDouble()
+                                targetLng = match.groupValues[2].toDouble()
+                                Log.d("GeoAlarm", "Extracted from URL Pattern: $targetLat, $targetLng")
+                                break
+                            }
+                        }
+
+                        // STRATEGY 2: Deep HTML Parsing (Attribute-Order Agnostic)
+                        if (targetLat == null) {
+                            val deepLinkRegex = Regex("android-app://com\\.google\\.android\\.apps\\.maps/geo/0,0\\?q=(?:.*?%40|.*?@)?(-?\\d+\\.\\d+)[,%2C]+(-?\\d+\\.\\d+)")
+                            val markerRegex = Regex("markers=(?:.*?%7C|.*?\\|)?(-?\\d+\\.\\d+)(?:%2C|,)(-?\\d+\\.\\d+)")
+
+                            // These regexes now catch the tags no matter what order Google puts the attributes in
+                            val metaLatRegex = Regex("content=[\"'](-?\\d+\\.\\d+)[\"']\\s*itemprop=[\"']latitude[\"']|itemprop=[\"']latitude[\"']\\s*content=[\"'](-?\\d+\\.\\d+)[\"']")
+                            val metaLngRegex = Regex("content=[\"'](-?\\d+\\.\\d+)[\"']\\s*itemprop=[\"']longitude[\"']|itemprop=[\"']longitude[\"']\\s*content=[\"'](-?\\d+\\.\\d+)[\"']")
+
+                            val deepLinkMatch = deepLinkRegex.find(htmlContent)
+                            val markerMatch = markerRegex.find(htmlContent)
+                            val latMatch = metaLatRegex.find(htmlContent)
+                            val lngMatch = metaLngRegex.find(htmlContent)
+
+                            if (deepLinkMatch != null) {
+                                targetLat = deepLinkMatch.groupValues[1].toDouble()
+                                targetLng = deepLinkMatch.groupValues[2].toDouble()
+                                Log.d("GeoAlarm", "Extracted from Android Deep Link")
+                            } else if (markerMatch != null) {
+                                targetLat = markerMatch.groupValues[1].toDouble()
+                                targetLng = markerMatch.groupValues[2].toDouble()
+                                Log.d("GeoAlarm", "Extracted from Pin Marker")
+                            } else if (latMatch != null && lngMatch != null) {
+                                // Extract whichever regex group caught the number
+                                val latStr = if (latMatch.groupValues[1].isNotEmpty()) latMatch.groupValues[1] else latMatch.groupValues[2]
+                                val lngStr = if (lngMatch.groupValues[1].isNotEmpty()) lngMatch.groupValues[1] else lngMatch.groupValues[2]
+                                targetLat = latStr.toDouble()
+                                targetLng = lngStr.toDouble()
+                                Log.d("GeoAlarm", "Extracted from HTML Meta Tags")
+                            }
+                        }
+
+                        // STRATEGY 3: The Dropped Pin & Full-Address Geocoder Fallback
+                        if (targetLat == null) {
+                            val placeRegex = Regex("/place/([^/]+)/")
+                            val placeMatch = placeRegex.find(currentUrl)
+
+                            if (placeMatch != null) {
+                                val rawPlace = placeMatch.groupValues[1]
+
+                                // Scenario A: It's a raw dropped pin (e.g., /place/10.123,76.123/)
+                                val coordMatch = Regex("^(-?\\d+\\.\\d+)(?:%2C|,)(-?\\d+\\.\\d+)$").find(rawPlace)
+                                if (coordMatch != null) {
+                                    targetLat = coordMatch.groupValues[1].toDouble()
+                                    targetLng = coordMatch.groupValues[2].toDouble()
+                                    Log.d("GeoAlarm", "Extracted from Dropped Pin URL")
+                                } else {
+                                    // Scenario B: It's a massive, exact address string. Let the OS translate it.
+                                    val cleanAddress = java.net.URLDecoder.decode(rawPlace.replace("+", " "), "UTF-8")
+                                    Log.d("GeoAlarm", "Attempting Geocoder with Full Address: $cleanAddress")
+
+                                    val addresses = geocoder.getFromLocationName(cleanAddress, 1)
+                                    if (!addresses.isNullOrEmpty()) {
+                                        targetLat = addresses[0].latitude
+                                        targetLng = addresses[0].longitude
+                                        Log.d("GeoAlarm", "Extracted via Geocoder Exact Address")
+                                    }
+                                }
+                            }
+                        }
+
+                        // FINALE: Update the UI
+                        if (targetLat != null && targetLng != null) {
+                            val sharedLatLng = LatLng(targetLat, targetLng)
+                            runOnUiThread {
+                                mMap.animateCamera(CameraUpdateFactory.newLatLngZoom(sharedLatLng, 15f))
+                                setTargetLocation(sharedLatLng)
+                            }
+                        } else {
+                            Log.e("GeoAlarm", "ALL EXTRACTIONS FAILED. URL: $currentUrl")
+                        }
+
+                    } catch (e: Exception) {
+                        Log.e("GeoAlarm", "Scraper crashed", e)
+                    }
+                }.start()
+            }
+        }
     }
 
     private fun checkLocationSettings() {
