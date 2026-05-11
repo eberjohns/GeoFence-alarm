@@ -25,7 +25,6 @@ class RadarService : Service() {
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
-    private val FINAL_RADIUS = 100.0 // The 100-meter sniper trigger
 
     override fun onCreate() {
         super.onCreate()
@@ -90,9 +89,14 @@ class RadarService : Service() {
     }
 
     private fun startActiveRadar() {
+        // Read coordinates
         val prefs = getSharedPreferences("GeoPrefs", Context.MODE_PRIVATE)
         val targetLat = prefs.getFloat("TARGET_LAT", 0f).toDouble()
         val targetLng = prefs.getFloat("TARGET_LNG", 0f).toDouble()
+
+        // READ THE SLIDER RADIUS: Fetch the dynamic value we saved in MainActivity (defaults to 500m)
+        val alarmPrefs = getSharedPreferences("GeoAlarmPrefs", Context.MODE_PRIVATE)
+        val dynamicTriggerRadius = alarmPrefs.getFloat("TARGET_RADIUS", 500f).toDouble()
 
         if (targetLat == 0.0) { stopSelf(); return }
 
@@ -108,17 +112,18 @@ class RadarService : Service() {
                     )
 
                     val distance = results[0]
-                    Log.d("RadarService", "Distance: ${distance.toInt()} meters")
+                    Log.d("RadarService", "Distance: ${distance.toInt()}m | Trigger at: ${dynamicTriggerRadius.toInt()}m")
 
-                    if (distance <= FINAL_RADIUS) {
-                        Log.e("RadarService", "100M FINAL RADIUS BREACHED! FIRING ALARM!")
+                    // THE FIX: Trigger when distance breaches the slider's radius
+                    if (distance <= dynamicTriggerRadius) {
+                        Log.e("RadarService", "${dynamicTriggerRadius.toInt()}M RADIUS BREACHED! FIRING ALARM!")
 
                         // 1. Fire the Full-Screen Intent Bypass
                         fireFullScreenAlarm()
 
                         // 2. Kill the Radar to save battery
                         fusedLocationClient.removeLocationUpdates(this)
-                        stopForeground(true)
+                        stopForeground(STOP_FOREGROUND_REMOVE) // Updated for newer Android versions
                         stopSelf()
                     }
                 }

@@ -59,7 +59,10 @@
         <activity
             android:name=".AlarmActivity"
             android:exported="false"
-            android:showOnLockScreen="true" />
+            android:launchMode="singleInstance"
+            android:showOnLockScreen="true"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"/>
         <service
             android:name=".RadarService"
             android:foregroundServiceType="location"

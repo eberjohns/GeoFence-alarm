@@ -37,12 +37,23 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.util.regex.Pattern
 import android.widget.Toast
+import com.google.android.material.slider.Slider
+import android.widget.TextView
+import android.view.View
+import com.google.android.gms.maps.model.Circle
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
     private lateinit var mMap: GoogleMap
     private var alarmLocation: LatLng? = null
     private val visualRadius = 500.0 // The map will show the 500m sniper zone
+
+    private lateinit var tvRadiusLabel: TextView
+    private lateinit var radiusSlider: Slider
+    private lateinit var radiusCard: View
+
+    private var currentRadius = 500.0 // Replaces your hardcoded visualRadius
+    private var mapCircle: Circle? = null // Keeps track of the red circle shape
     private lateinit var btnSetAlarm: Button
     private lateinit var etSearch: EditText
     private lateinit var btnSearch: Button
@@ -116,6 +127,25 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
                 true
             } else false
         }
+
+        tvRadiusLabel = findViewById(R.id.tvRadiusLabel)
+        radiusSlider = findViewById(R.id.radiusSlider)
+        radiusCard = findViewById(R.id.radiusCard)
+
+        // Listen for the user dragging the slider
+        radiusSlider.addOnChangeListener { _, value, _ ->
+            currentRadius = value.toDouble()
+
+            // Format the text nicely (e.g., "Trigger Radius: 1.5km" or "500m")
+            if (currentRadius >= 1000) {
+                tvRadiusLabel.text = "Trigger Radius: ${currentRadius / 1000}km"
+            } else {
+                tvRadiusLabel.text = "Trigger Radius: ${currentRadius.toInt()}m"
+            }
+
+            // Animate the red circle expanding/contracting on the map in real-time
+            mapCircle?.radius = currentRadius
+        }
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -180,6 +210,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     }
 
     private fun cancelAlarm() {
+        radiusCard.visibility = View.GONE
+
         // 1. Tell Android OS to delete the 2km wide net
         geofencingClient.removeGeofences(geofencePendingIntent)
 
@@ -206,10 +238,16 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         alarmLocation = latLng
 
         mMap.addMarker(MarkerOptions().position(latLng).title("Sniper Trigger Zone"))
-        mMap.addCircle(
-            CircleOptions().center(latLng).radius(visualRadius)
+
+        // Save the circle to the variable so the slider can resize it
+        mapCircle = mMap.addCircle(
+            CircleOptions().center(latLng).radius(currentRadius)
                 .strokeColor(Color.RED).fillColor(Color.argb(70, 255, 0, 0)).strokeWidth(5f)
         )
+
+        // Show the controls
+        radiusCard.visibility = View.VISIBLE
+        btnSetAlarm.visibility = View.VISIBLE
 
         btnSetAlarm.visibility = android.view.View.VISIBLE
         btnSetAlarm.isEnabled = true
@@ -389,15 +427,28 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             return
         }
 
-        // 1. Tell the OS to forget all previous geofences and clear its location cache
+        // 1. Save the exact slider value to the phone's memory
+        val sharedPrefs = getSharedPreferences("GeoAlarmPrefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit().putFloat("TARGET_RADIUS", currentRadius.toFloat()).apply()
+
+        // ADD THIS: Save the coordinates so the RadarService knows where the center of the circle is!
+        val geoPrefs = getSharedPreferences("GeoPrefs", Context.MODE_PRIVATE)
+        geoPrefs.edit()
+            .putFloat("TARGET_LAT", latLng.latitude.toFloat())
+            .putFloat("TARGET_LNG", latLng.longitude.toFloat())
+            .apply()
+
+        // 2. Tell the OS to forget all previous geofences
         geofencingClient.removeGeofences(geofencePendingIntent).addOnCompleteListener {
 
-            // 2. Generate a totally unique ID using the current millisecond
             val uniqueGeofenceId = "ALARM_ZONE_${System.currentTimeMillis()}"
 
+            // 3. THE MATH FIX: Slider Radius + 2000m Wake-Up Buffer
+            val tripwireRadius = currentRadius.toFloat() + 2000f
+
             val geofence = Geofence.Builder()
-                .setRequestId(uniqueGeofenceId) // <-- THE FIX: The OS treats this as a brand new place
-                .setCircularRegion(latLng.latitude, latLng.longitude, 2000f)
+                .setRequestId(uniqueGeofenceId)
+                .setCircularRegion(latLng.latitude, latLng.longitude, tripwireRadius) // Uses the massive tripwire
                 .setExpirationDuration(Geofence.NEVER_EXPIRE)
                 .setTransitionTypes(Geofence.GEOFENCE_TRANSITION_ENTER)
                 .build()

@@ -68,6 +68,51 @@
         </LinearLayout>
     </androidx.cardview.widget.CardView>
 
+    <!-- Dynamic Radius Control Panel -->
+    <androidx.cardview.widget.CardView
+        android:id="@+id/radiusCard"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginHorizontal="16dp"
+        android:layout_marginBottom="16dp"
+        android:visibility="gone"
+        app:cardBackgroundColor="#1E1E1E"
+        app:cardCornerRadius="16dp"
+        app:cardElevation="8dp"
+        app:layout_constraintBottom_toTopOf="@+id/btnSetAlarm"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp">
+
+            <TextView
+                android:id="@+id/tvRadiusLabel"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Trigger Radius: 500m"
+                android:textColor="#FFFFFF"
+                android:textSize="14sp"
+                android:textStyle="bold" />
+
+            <com.google.android.material.slider.Slider
+                android:id="@+id/radiusSlider"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:stepSize="100.0"
+                android:valueFrom="100.0"
+                android:valueTo="5000.0"
+                android:value="500.0"
+                app:haloColor="#4D4CAF50"
+                app:thumbColor="#4CAF50"
+                app:trackColorActive="#4CAF50"
+                app:trackColorInactive="#333333" />
+        </LinearLayout>
+    </androidx.cardview.widget.CardView>
+
     <!-- Floating Material Button (Darkened) -->
     <com.google.android.material.button.MaterialButton
         android:id="@+id/btnSetAlarm"
