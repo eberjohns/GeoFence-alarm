@@ -62,7 +62,8 @@
             android:launchMode="singleInstance"
             android:showOnLockScreen="true"
             android:showWhenLocked="true"
-            android:turnScreenOn="true"/>
+            android:turnScreenOn="true"
+            android:theme="@style/Theme.MaterialComponents.DayNight.NoActionBar" />
         <service
             android:name=".RadarService"
             android:foregroundServiceType="location"
