@@ -11,11 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.example.geoalarm" // (Keep whatever yours is)
+        applicationId = "com.example.geoalarm"
         minSdk = 24
         targetSdk = 35
         versionCode = 2
-        versionName = "2.0"
+        versionName = "2.1"
 
         // --- THE VAULT READER ---
         val keystoreProperties = Properties()

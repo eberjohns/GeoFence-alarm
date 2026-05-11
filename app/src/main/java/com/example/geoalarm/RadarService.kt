@@ -20,8 +20,11 @@ import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
+import android.content.IntentFilter
+import android.location.LocationManager
 
 class RadarService : Service() {
+    private val locationStateReceiver = LocationStateReceiver()
 
     private lateinit var fusedLocationClient: FusedLocationProviderClient
     private lateinit var locationCallback: LocationCallback
@@ -29,6 +32,9 @@ class RadarService : Service() {
     override fun onCreate() {
         super.onCreate()
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
+
+        // Dynamically listen for GPS toggles while radar is active
+        registerReceiver(locationStateReceiver, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -142,5 +148,8 @@ class RadarService : Service() {
         if (::locationCallback.isInitialized) {
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
+
+        // Clean up the receiver
+        unregisterReceiver(locationStateReceiver)
     }
 }

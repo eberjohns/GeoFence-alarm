@@ -41,6 +41,8 @@ import com.google.android.material.slider.Slider
 import android.widget.TextView
 import android.view.View
 import com.google.android.gms.maps.model.Circle
+import android.content.IntentFilter
+import android.location.LocationManager
 
 class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
@@ -62,6 +64,8 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private val geocoder by lazy { Geocoder(this) }
 
     private var isSystemArmed = false
+
+    private val locationStateReceiver = LocationStateReceiver()
 
     private lateinit var geofencingClient: GeofencingClient
     private val geofencePendingIntent: PendingIntent by lazy {
@@ -146,6 +150,14 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
             // Animate the red circle expanding/contracting on the map in real-time
             mapCircle?.radius = currentRadius
         }
+
+        // Dynamically listen for GPS toggles while the UI is alive
+        registerReceiver(locationStateReceiver, IntentFilter(LocationManager.PROVIDERS_CHANGED_ACTION))
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(locationStateReceiver) // Clean up to prevent memory leaks
     }
 
     override fun onMapReady(googleMap: GoogleMap) {
@@ -157,6 +169,9 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         }
 
         handleSharedIntent(intent)
+
+        // Check if we need to restore a running alarm
+        restoreArmedState()
     }
 
     // This fires when the app is already open in the background,
@@ -212,6 +227,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
     private fun cancelAlarm() {
         radiusCard.visibility = View.GONE
 
+        // Tell the memory the system is disarmed
+        val alarmPrefs = getSharedPreferences("GeoAlarmPrefs", Context.MODE_PRIVATE)
+        alarmPrefs.edit().putBoolean("IS_SYSTEM_ARMED", false).apply()
+
         // 1. Tell Android OS to delete the 2km wide net
         geofencingClient.removeGeofences(geofencePendingIntent)
 
@@ -254,6 +273,56 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
         btnSetAlarm.text = "SET ALARM"
         btnSetAlarm.setBackgroundColor(Color.parseColor("#4CAF50"))
         btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(0, 0, 0, 0)
+    }
+
+    private fun restoreArmedState() {
+        val alarmPrefs = getSharedPreferences("GeoAlarmPrefs", Context.MODE_PRIVATE)
+        val currentlyArmed = alarmPrefs.getBoolean("IS_SYSTEM_ARMED", false)
+
+        if (currentlyArmed) {
+            // 1. Tell the UI variable we are armed
+            isSystemArmed = true
+
+            // 2. Fetch the saved coordinates and radius
+            val geoPrefs = getSharedPreferences("GeoPrefs", Context.MODE_PRIVATE)
+            val savedLat = geoPrefs.getFloat("TARGET_LAT", 0f).toDouble()
+            val savedLng = geoPrefs.getFloat("TARGET_LNG", 0f).toDouble()
+            currentRadius = alarmPrefs.getFloat("TARGET_RADIUS", 500f).toDouble()
+
+            if (savedLat != 0.0 && savedLng != 0.0) {
+                val savedLatLng = LatLng(savedLat, savedLng)
+                alarmLocation = savedLatLng
+
+                // 3. Rebuild the Map visuals
+                mMap.clear()
+                mMap.addMarker(MarkerOptions().position(savedLatLng).title("Sniper Trigger Zone"))
+                mapCircle = mMap.addCircle(
+                    CircleOptions().center(savedLatLng).radius(currentRadius)
+                        .strokeColor(Color.RED).fillColor(Color.argb(70, 255, 0, 0)).strokeWidth(5f)
+                )
+
+                // Move the camera to the saved location
+                mMap.moveCamera(CameraUpdateFactory.newLatLngZoom(savedLatLng, 15f))
+
+                // 4. Restore the Slider UI
+                radiusCard.visibility = View.VISIBLE
+                radiusSlider.value = currentRadius.toFloat()
+                if (currentRadius >= 1000) {
+                    tvRadiusLabel.text = "Trigger Radius: ${currentRadius / 1000}km"
+                } else {
+                    tvRadiusLabel.text = "Trigger Radius: ${currentRadius.toInt()}m"
+                }
+
+                // 5. Restore the Red Kill Switch Button
+                btnSetAlarm.visibility = View.VISIBLE
+                btnSetAlarm.isEnabled = true
+                btnSetAlarm.text = "CANCEL ALARM"
+                btnSetAlarm.setBackgroundColor(Color.parseColor("#F44336"))
+                btnSetAlarm.setCompoundDrawablesWithIntrinsicBounds(android.R.drawable.ic_menu_close_clear_cancel, 0, 0, 0)
+
+                Log.d("GeoAlarm", "UI Restored! Successfully synced with background Radar.")
+            }
+        }
     }
 
     private fun handleSharedIntent(intent: Intent) {
@@ -429,7 +498,10 @@ class MainActivity : AppCompatActivity(), OnMapReadyCallback {
 
         // 1. Save the exact slider value to the phone's memory
         val sharedPrefs = getSharedPreferences("GeoAlarmPrefs", Context.MODE_PRIVATE)
-        sharedPrefs.edit().putFloat("TARGET_RADIUS", currentRadius.toFloat()).apply()
+        sharedPrefs.edit()
+            .putFloat("TARGET_RADIUS", currentRadius.toFloat())
+            .putBoolean("IS_SYSTEM_ARMED", true)
+            .apply()
 
         // ADD THIS: Save the coordinates so the RadarService knows where the center of the circle is!
         val geoPrefs = getSharedPreferences("GeoPrefs", Context.MODE_PRIVATE)
